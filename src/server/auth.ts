@@ -5,9 +5,11 @@ import {
   type DefaultSession,
   type NextAuthOptions,
 } from "next-auth";
-
+import CredentialsProvider from "next-auth/providers/credentials";
 // import { env } from "~/env.mjs";
 import { prisma } from "~/server/db";
+import { loginSchema } from "~/utils/validations/auth";
+import { verify } from "argon2";
 
 /**
  * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
@@ -37,20 +39,55 @@ declare module "next-auth" {
  */
 export const authOptions: NextAuthOptions = {
   callbacks: {
-    session: ({ session, user }) => ({
-      ...session,
-      user: {
-        ...session.user,
-        id: user.id,
-      },
-    }),
+    async jwt({ token, user }) {
+      return { ...token, ...user }
+    },
+    async session({ session, token }) {
+      //@ts-ignore
+      session.user = token
+      return session
+    }
   },
   adapter: PrismaAdapter(prisma),
   providers: [
-    // DiscordProvider({
-    //   clientId: env.DISCORD_CLIENT_ID,
-    //   clientSecret: env.DISCORD_CLIENT_SECRET,
-    // }),
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        username: { label: "Email", type: "text", placeholder: "email address" },
+        password: { label: "Password", type: "password" }
+      },
+      authorize: async (credentials, req) => {
+        try {
+          const creds = await loginSchema.parseAsync(credentials)
+          const user = await prisma.user.findFirst({
+            where: {
+              email: creds.email
+            }
+          })
+
+          if (!user) {
+            return new Response(JSON.stringify({ msg: "User does not exist" }))
+          }
+
+          const isValidPassword = await verify(user.password, creds.password)
+          if (!isValidPassword) return new Response(JSON.stringify({ msg: "Wrong passwords" }))
+
+          return new Response(JSON.stringify({
+            id: user.id,
+            email: user.email,
+            name: user.name
+          }), { status: 201 }) as any
+
+        } catch (error) {
+          return new Response(JSON.stringify({ error: "wrong credentials" }), {
+            status: 401,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          })
+        }
+      }
+    }),
     /**
      * ...add more providers here.
      *
