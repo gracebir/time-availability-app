@@ -20,9 +20,8 @@ const SignUpForm = () => {
     },
     validateOnBlur: true,
     validationSchema: signupSchemaClient,
-    onSubmit: (value) => {
-      void mutate(value);
-
+    onSubmit: async (value) => {
+      await mutate(value)
       if (isLoading) {
         toast.loading("loading..")
         resetForm()
